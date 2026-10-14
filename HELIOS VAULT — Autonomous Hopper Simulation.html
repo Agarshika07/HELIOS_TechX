@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HELIOS VAULT — Autonomous Hopper Simulation</title>
+<style>
+:root{--bg:#15171a;--pn:rgba(18,20,24,.9);--ln:#2c3036;--tx:#e8e6e1;--mu:#8b9099;--cr:#d11a3a;--cy:#5fd4e8;--gn:#7bd88f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font:11.5px/1.45 ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.p{position:fixed;background:var(--pn);border:1px solid var(--ln);border-radius:6px;padding:8px 10px}
+#L{left:8px;top:8px;width:252px;max-height:calc(100% - 16px);overflow:auto}
+#T{right:8px;top:8px;width:270px;max-height:calc(100% - 16px);overflow:auto}
+h1{margin:0 0 6px;font-size:13px;letter-spacing:.16em;color:var(--tx)}h1 b{color:var(--cr)}h1 small{display:block;color:var(--mu);letter-spacing:0;font-weight:400;font-size:10px}
+h3{margin:8px 0 3px;font-size:10px;letter-spacing:.14em;color:var(--cr);text-transform:uppercase;border-top:1px solid var(--ln);padding-top:6px}
+label{display:flex;justify-content:space-between;align-items:center;gap:6px;color:var(--mu);margin:3px 0}
+select,button{background:#1d2025;color:var(--tx);border:1px solid var(--ln);border-radius:4px;padding:4px 6px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--cr)}button.on{background:var(--cr);border-color:var(--cr)}
+.bt{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}.bt button{flex:1}
+input[type=range]{width:100px;accent-color:var(--cr)}
+.r{display:flex;justify-content:space-between;gap:6px}.r span{color:var(--mu)}.r b{font-weight:600;text-align:right}
+#ph{font-size:14px;color:var(--cr)}
+#log{color:var(--mu);font-size:10px;max-height:150px;overflow:hidden}#log div:first-child{color:var(--tx)}#log i{color:var(--cy);font-style:normal}
+pre{margin:0;color:var(--mu);font-size:10px;white-space:pre-wrap}
+#fp{left:268px;bottom:8px;width:280px;height:180px;padding:0;pointer-events:none;overflow:hidden;border-color:var(--cy)}
+#fp canvas{width:280px;height:180px;display:block}
+#hide{position:fixed;left:8px;bottom:8px;z-index:5;padding:3px 8px;display:none}
+@media(max-width:820px){#hide{display:block}#fp{left:auto;right:8px;bottom:8px;width:200px;height:128px}#fp canvas{width:200px;height:128px}.hid #L,.hid #T{display:none}}
+</style></head><body>
+<canvas id="c"></canvas>
+<button id="hide">panels</button>
+<div class="p" id="L">
+ <h1>HELIOS <b>VAULT</b><small>Autonomous hopper · simulation testbed</small></h1>
+ <label>Mechanism<select id="cfg"><option value="A">A · Four-leg</option><option value="B">B · Central piston</option></select></label>
+ <label>Control<select id="ctl"><option value="auto">Autonomous</option><option value="man">Manual</option></select></label>
+ <label>Perception<select id="perc"><option value="adaptive">Adaptive</option><option value="always">Always on</option><option value="off">Off</option></select></label>
+ <div class="bt"><button id="pz">Pause</button><button id="st">Step</button><button id="rs">Reset</button><button id="ds">Disturb</button></div>
+ <div class="bt" id="vw"><button data-v="free">Free</button><button data-v="side">Side</button><button data-v="top">Top</button><button data-v="front">Front</button></div>
+ <div style="color:var(--mu);font-size:10px">Click terrain: set target · drag: orbit · right-drag/shift: pan · wheel: zoom · Manual: arrows move target, Space hops</div>
+ <h3>Parameters</h3>
+ <label>Sim speed<input type="range" id="spd" min=".25" max="4" step=".25" value="1"></label>
+ <label>Terrain difficulty <b id="v_diff"></b><input type="range" id="diff" min="0" max="1.5" step=".1" value="1"></label>
+ <label>Sensor noise <b id="v_noise"></b><input type="range" id="noise" min="0" max="3" step=".1" value="1"></label>
+ <label>Hop angle° <b id="v_ang"></b><input type="range" id="ang" min="35" max="75" step="1" value="55"></label>
+ <label>Hop power cap <b id="v_pwr"></b><input type="range" id="pwr" min="5" max="11" step=".5" value="9"></label>
+ <label>Risk threshold <b id="v_thr"></b><input type="range" id="thr" min=".1" max=".8" step=".05" value=".35"></label>
+ <label>Show sensors<input type="checkbox" id="sens" checked></label>
+ <h3>Modelled mechanism</h3><pre id="par"></pre>
+</div>
+<div class="p" id="T">
+ <div class="r"><span>PHASE</span><b id="ph">-</b></div>
+ <div class="r"><span>Perception</span><b id="pcs">-</b></div>
+ <div class="r"><span>Target dist</span><b id="td">-</b></div>
+ <h3>Estimate / predict</h3>
+ <div class="r"><span>Pos σ (est) / err (true)</span><b id="pe">-</b></div>
+ <div class="r"><span>Roughness est</span><b id="rg">-</b></div>
+ <div class="r"><span>Landing risk / region</span><b id="rk">-</b></div>
+ <div class="r"><span>Learned bias (m)</span><b id="bs">-</b></div>
+ <h3>Sensors</h3>
+ <div class="r"><span>IMU tilt est (rx,rz)°</span><b id="im">-</b></div>
+ <div class="r"><span>IMU tilt true</span><b id="it">-</b></div>
+ <div class="r"><span>Gyro (x,z) rad/s</span><b id="gy">-</b></div>
+ <div class="r"><span>Specific force</span><b id="ac">-</b></div>
+ <div class="r"><span>Leg encoder ext</span><b id="en">-</b></div>
+ <div class="r"><span>Camera</span><b id="cm">-</b></div>
+ <h3>Mission metrics</h3>
+ <div class="r"><span>Hops / falls</span><b id="hf">-</b></div>
+ <div class="r"><span>Landing err mean</span><b id="le">-</b></div>
+ <div class="r"><span>Scans / skipped</span><b id="sc">-</b></div>
+ <div class="r"><span>Energy hop / camera (J)</span><b id="en2">-</b></div>
+ <h3>Decision log</h3><div id="log"></div>
+</div>
+<div class="p" id="fp"><canvas id="ov" width="280" height="180"></canvas></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const G=9.81,TAU=6.2832,$=id=>document.getElementById(id);
+const rnd=()=>{let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(TAU*Math.random())};
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v)),sm=t=>{t=cl(t,0,1);return t*t*(3-2*t)};
+const S={diff:1,noise:1,ang:55*Math.PI/180,pwr:9,thr:.35,speed:1,auto:true,paused:false,perc:'adaptive',cfg:'A',T:{x:22,z:0}};
+const CFG={
+ A:{n:'Four-leg',m:6.5,eff:.55,sigL:.03,kick:.35,att:9,tiltLim:.38,slopeLim:.52,absorb:.8,v0max:9.5,f0:.2,f1:.45},
+ B:{n:'Central piston',m:5,eff:.7,sigL:.05,kick:.7,att:4.5,tiltLim:.24,slopeLim:.36,absorb:.7,v0max:11,f0:.25,f1:.55}};
+const CF=()=>CFG[S.cfg],foot=e=>CF().f0+e*CF().f1,vcap=()=>Math.min(CF().v0max,S.pwr);
+// ---------- terrain (analytic, shared by physics + mesh) ----------
+const OBS=[[-12,-3,.8,.5],[-5,6,.9,.6],[3,-4,.8,.7],[14,2,1,.8],[20,-6,.8,.6],[-16,5,.7,.4]];
+const macro=x=>3*sm(x/12);
+function hT(x,z){let h=macro(x);h+=S.diff*sm((x+16)/6)*(.18*Math.sin(.7*x+1.3)*Math.cos(.6*z)+.1*Math.sin(1.9*x)*Math.sin(1.7*z));
+ for(const[o,p,r,a]of OBS){const d=Math.hypot(x-o,z-p);if(d<r)h+=a*S.diff*sm(1-d/r)}
+ const gd=Math.hypot(x+8,z-2);if(gd<3.2)h-=(.4+S.diff*.8)*sm(1-gd/3.2);return h}
+const muT=(x,z)=>(((x-8)/5)**2+((z+3)/4)**2<1)?.15:(Math.hypot(x+2,z-10)<4?.4:.7);
+const grad=(f,x,z,e=.25)=>[(f(x+e,z)-f(x-e,z))/(2*e),(f(x,z+e)-f(x,z-e))/(2*e)];
+// ---------- three.js scene ----------
+const cv=$('c'),rd=new THREE.WebGLRenderer({canvas:cv,antialias:true});rd.setPixelRatio(Math.min(devicePixelRatio,2));rd.autoClear=false;
+const sc=new THREE.Scene();sc.background=new THREE.Color(0x15171a);sc.fog=new THREE.Fog(0x15171a,50,120);
+const cam=new THREE.PerspectiveCamera(50,1,.1,300),fpc=new THREE.PerspectiveCamera(70,280/180,.05,120);
+sc.add(new THREE.HemisphereLight(0xdfe6ee,0x2a2018,.8));const sun=new THREE.DirectionalLight(0xffffff,.9);sun.position.set(20,35,15);sc.add(sun);
+const geo=new THREE.PlaneGeometry(56,36,112,72);geo.rotateX(-Math.PI/2);
+geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count*3),3));
+const terr=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:.95}));sc.add(terr);
+function rebuild(){const p=geo.attributes.position,c=geo.attributes.color;
+ for(let i=0;i<p.count;i++){const x=p.getX(i),z=p.getZ(i),h=hT(x,z);p.setY(i,h);
+  let col=[.2,.21,.24],m=muT(x,z);if(m<.2)col=[.18,.32,.38];else if(m<.5)col=[.32,.26,.2];
+  if(OBS.some(o=>Math.hypot(x-o[0],z-o[1])<o[2]))col=[.5,.14,.2];
+  if(Math.hypot(x+8,z-2)<3.2)col=[.08,.08,.1];
+  const s=.8+.35*sm(h/3)+((i*7919)%13)/130;c.setXYZ(i,col[0]*s,col[1]*s,col[2]*s)}
+ p.needsUpdate=true;c.needsUpdate=true;geo.computeVertexNormals()}
+const grid=new THREE.GridHelper(56,28,0x333840,0x23272c);grid.position.y=-.2;sc.add(grid);
+// target + prediction overlays
+const tgt=new THREE.Group();tgt.add(new THREE.Mesh(new THREE.TorusGeometry(.7,.06,6,28).rotateX(Math.PI/2),new THREE.MeshBasicMaterial({color:0xd11a3a})));
+tgt.add(new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,4,5).translate(0,2,0),new THREE.MeshBasicMaterial({color:0xd11a3a,transparent:true,opacity:.6})));sc.add(tgt);
+const land=new THREE.Mesh(new THREE.RingGeometry(.9,1,40).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0x5fd4e8,transparent:true,opacity:.8,side:2}));land.visible=false;sc.add(land);
+const arc=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x5fd4e8}));arc.visible=false;sc.add(arc);
+const trail=[];
+// ---------- robot visuals ----------
+const bot=new THREE.Group();bot.rotation.order='YXZ';sc.add(bot);
+const M=(c,m=.5,r=.4)=>new THREE.MeshStandardMaterial({color:c,metalness:m,roughness:r});
+const mG=M(0x24272c),mW=M(0xe8e6e1,.1,.5),mC=M(0xd11a3a,.3,.4);
+let legs=[],rod,sleeve,coils=[],sensG=new THREE.Group(),fov;
+const Y=new THREE.Vector3(0,1,0),link=(m,a,b)=>{const d=b.clone().sub(a),l=d.length();m.position.copy(a).add(b).multiplyScalar(.5);m.scale.set(1,l,1);m.quaternion.setFromUnitVectors(Y,d.normalize())};
+function buildBot(){while(bot.children.length)bot.remove(bot.children[0]);legs=[];coils=[];
+ bot.add(new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,.2,6),mG));
+ const top=new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,.04,6),mW);top.position.y=.12;bot.add(top);
+ const st=new THREE.Mesh(new THREE.TorusGeometry(.345,.018,6,6).rotateX(Math.PI/2),mC);st.position.y=.02;st.rotation.y=Math.PI/6;bot.add(st);
+ const lens=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.1,12).rotateZ(Math.PI/2),M(0x050608,.8,.2));lens.position.set(.34,.04,0);bot.add(lens);
+ const imu=new THREE.Mesh(new THREE.BoxGeometry(.1,.04,.1),mC);imu.position.set(-.05,.16,0);bot.add(imu);
+ if(S.cfg==='A')for(const sx of[-1,1])for(const sz of[-1,1]){const m=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,1,8),mW);bot.add(m);
+  const f=new THREE.Mesh(new THREE.SphereGeometry(.06,8,8),mC);bot.add(f);legs.push({sx,sz,m,f})}
+ else{sleeve=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,.26,12),mW);sleeve.position.y=-.2;bot.add(sleeve);
+  rod=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,1,8),M(0xb8b8b8,.9,.3));bot.add(rod);
+  legs=[{f:new THREE.Mesh(new THREE.CylinderGeometry(.17,.17,.04,16),mC)}];bot.add(legs[0].f);
+  for(let i=0;i<5;i++){const t=new THREE.Mesh(new THREE.TorusGeometry(.13,.015,6,14).rotateX(Math.PI/2),mC);bot.add(t);coils.push(t)}}
+ // sensor markers + camera FOV
+ sensG=new THREE.Group();const cy=new THREE.MeshBasicMaterial({color:0x5fd4e8,transparent:true,opacity:.9});
+ [[-.05,.2,0],[.38,.04,0],[.2,-.05,.25],[.2,-.05,-.25]].forEach(p=>{const s=new THREE.Mesh(new THREE.SphereGeometry(.05,8,8),cy);s.position.set(...p);sensG.add(s)});
+ fov=new THREE.Mesh(new THREE.ConeGeometry(.9,2.2,4,1,true).rotateZ(-Math.PI/2).translate(1.5,0,0),new THREE.MeshBasicMaterial({color:0x5fd4e8,transparent:true,opacity:.12,side:2,wireframe:true}));fov.position.set(.38,.04,0);sensG.add(fov);
+ bot.add(sensG);
+ fpc.rotation.set(-.3,-Math.PI/2,0,'YXZ');fpc.position.set(.4,.06,0);bot.add(fpc)}
+function poseLegs(e){const L=foot(e);
+ if(S.cfg==='A')legs.forEach(l=>{const sp=.28*(1-e*.5),a=new THREE.Vector3(l.sx*.25,-.06,l.sz*.25),b=new THREE.Vector3(l.sx*(.25+sp),-L,l.sz*(.25+sp));link(l.m,a,b);l.f.position.copy(b)});
+ else{link(rod,new THREE.Vector3(0,-.1,0),new THREE.Vector3(0,-L+.04,0));legs[0].f.position.set(0,-L,0);coils.forEach((t,i)=>t.position.set(0,-.12-(L-.18)*i/4,0))}}
+// ---------- robot state ----------
+let R,T=0,logs=[],MEM={},manual=false,lastScanT=-9;
+const key=(x,z)=>Math.round(x/3)+','+Math.round(z/3);
+function log(tag,msg){logs.unshift(`[${T.toFixed(1)}s] <i>${tag}</i> ${msg}`);if(logs.length>9)logs.pop()}
+function reset(){R={x:-24,z:0,y:0,vx:0,vy:0,vz:0,tx:0,tz:0,wx:0,wz:0,yaw:0,e:.8,phase:'STANCE',t:0,plan:null,err:{x:0,z:0},sp:.05,rough:0,bias:{x:0,z:0},since:0,
+  etx:0,etz:0,bx:0,bz:0,gx:0,gz:0,spike:0,acc:G,hops:0,falls:0,errSum:0,scans:0,skipped:0,Eh:0,Ec:0,camOn:false,idleLogged:false,landed:null};
+ R.y=hT(R.x,R.z)+foot(R.e);MEM={};T=0;logs=[];arc.visible=land.visible=false;
+ log('INIT',`config ${S.cfg} (${CF().n}), target (${S.T.x.toFixed(0)}, ${S.T.z.toFixed(0)})`)}
+// ---------- sensing + risk models ----------
+function imuStep(dt){const n=S.noise,fl=R.phase==='FLIGHT';
+ R.gz=R.wz+R.bz+rnd()*.03*n;R.gx=R.wx+R.bx+rnd()*.03*n;
+ if(fl){R.etz+=R.gz*dt;R.etx+=R.gx*dt}else{R.etz=R.tz+rnd()*.01*n;R.etx=R.tx+rnd()*.01*n}
+ R.spike*=.9;R.acc=(fl?Math.abs(rnd())*.2*n:G+rnd()*.15*n)+R.spike}
+function risk(x,z,model){const C=CF(),hf=model==='prior'?(a)=>macro(a):hT,f=model==='prior'?(a,b)=>macro(a):hT;
+ const[gx,gz]=grad(f,x,z),sl=Math.atan(Math.hypot(gx,gz));let dev=0;
+ for(const[dx,dz]of[[1,0],[-1,0],[0,1],[0,-1]])dev+=Math.abs(f(x+dx,z+dz)-f(x,z)-(gx*dx+gz*dz));dev/=4;
+ const mu=model==='prior'?(MEM[key(x,z)]??.7):muT(x,z)*(1+rnd()*.12*S.noise);
+ let r=.6*sl/C.slopeLim+.9*Math.min(dev/.5,1.2)+.5*Math.max(0,(Math.tan(sl)+.1)/mu-.8);
+ if(model==='cam')r+=rnd()*.05*S.noise;return Math.max(0,r)}
+// ---------- planning (SENSE→ESTIMATE→PREDICT→DECIDE) ----------
+function plan(){const C=CF(),ex=R.x+R.err.x,ez=R.z+R.err.z,Tg=S.T;
+ const dx=Tg.x-ex,dz=Tg.z-ez,dist=Math.hypot(dx,dz)||.01,rmax=.85*vcap()**2*Math.sin(2*S.ang)/G,dd=Math.min(dist,rmax),ux=dx/dist,uz=dz/dist;
+ const A={x:cl(ex+ux*dd,-27,27),z:cl(ez+uz*dd,-17,17)};
+ const rp=risk(A.x,A.z,'prior')+2.5*R.rough;let scan=false,why;
+ if(!S.auto)why='manual: perception unused';
+ else if(S.perc==='always'){scan=true;why='always-on mode'}
+ else if(S.perc==='off')why='perception disabled';
+ else if(rp>S.thr){scan=true;why=`prior risk ${rp.toFixed(2)} > ${S.thr}`}
+ else if(R.sp>.5){scan=true;why=`pos σ ${R.sp.toFixed(2)} m too high`}
+ else if(R.since>=8){scan=true;why='periodic refresh'}
+ else{why=`prior risk ${rp.toFixed(2)} ≤ ${S.thr}, σ ${R.sp.toFixed(2)}`}
+ log(scan?'PERCEIVE':'SKIP-CAM',(scan?'camera ON: ':'camera off: ')+why);
+ if(scan)R.scans++;else R.skipped++;
+ const model=scan?'cam':'prior',pts=[[0,0]];if(S.auto)for(let k=0;k<8;k++)pts.push([Math.cos(k*.785)*1.2,Math.sin(k*.785)*1.2]);
+ let best=null,bj=1e9;const cands=[];
+ for(const[p,q]of pts){const x=cl(A.x+p,-27,27),z=cl(A.z+q,-17,17),r=risk(x,z,model)+(scan?0:2.5*R.rough),
+  j=r+.12*Math.hypot(p,q)+.05*Math.hypot(Tg.x-x,Tg.z-z)/Math.max(rmax,1);cands.push({x,z,r});if(j<bj){bj=j;best={x,z,r}}}
+ const aim={x:best.x-R.bias.x,z:best.z-R.bias.z},Dx=aim.x-ex,Dz=aim.z-ez,d2=Math.hypot(Dx,Dz)||.01;
+ const hm=model==='prior'?macro(aim.x):hT(aim.x,aim.z)+rnd()*.05*S.noise,dh=hm-hT(R.x,R.z),th=S.ang;
+ const den=2*Math.cos(th)**2*(d2*Math.tan(th)-dh);let v0=den>.05?Math.sqrt(G*d2*d2/den):vcap();v0=Math.min(v0,vcap());
+ const tf=d2/(v0*Math.cos(th)),f=model==='prior'?(a)=>macro(a):hT,[gx,gz]=grad(model==='prior'?(a,b)=>macro(a):hT,best.x,best.z);
+ const rad=Math.hypot(.15,R.sp,C.sigL*d2,.1*S.noise);
+ R.plan={c:best,aim,ux:Dx/d2,uz:Dz/d2,v0,th,tf,dd:d2,model,usedCam:scan,scanT:scan?.4:0,chargeT:.5,t:0,fixed:false,cands,rad,tgz:Math.atan(gx),tgx:Math.atan(-gz),clearedT:T};
+ R.yawT=Math.atan2(-R.plan.uz,R.plan.ux);
+ log('PREDICT',`hop ${d2.toFixed(1)} m, v0 ${v0.toFixed(1)} m/s, flight ${tf.toFixed(2)} s, region ±${rad.toFixed(2)} m`);
+ log('DECIDE',`site (${best.x.toFixed(1)},${best.z.toFixed(1)}) risk ${best.r.toFixed(2)} via ${scan?'camera':'prior map'}`);
+ const pts3=[];for(let i=0;i<=24;i++){const t=tf*i/24;pts3.push(new THREE.Vector3(R.x+R.plan.ux*v0*Math.cos(th)*t,R.y+v0*Math.sin(th)*t-.5*G*t*t,R.z+R.plan.uz*v0*Math.cos(th)*t))}
+ arc.geometry.setFromPoints(pts3);arc.visible=true;land.visible=true;land.position.set(best.x,hT(best.x,best.z)+.08,best.z);land.scale.setScalar(rad)}
+function launch(){const C=CF(),P=R.plan,v=P.v0*(1+rnd()*C.sigL),thA=P.th+rnd()*.015,yw=rnd()*C.sigL*.5,
+  ux=P.ux*Math.cos(yw)-P.uz*Math.sin(yw),uz=P.ux*Math.sin(yw)+P.uz*Math.cos(yw);
+ R.vx=ux*v*Math.cos(thA);R.vz=uz*v*Math.cos(thA);R.vy=v*Math.sin(thA);R.Eh+=.5*C.m*v*v/C.eff;
+ R.wz=rnd()*C.kick;R.wx=rnd()*C.kick*.6;R.bz=rnd()*.03*S.noise;R.bx=rnd()*.03*S.noise;R.etz=R.tz;R.etx=R.tx;
+ R.phase='FLIGHT';R.t=0;R.take={x:R.x,z:R.z};R.hops++;R.since=P.usedCam?0:R.since+1;R.e=.4;log('ACT',`launch v0 ${v.toFixed(2)} m/s (cmd ${P.v0.toFixed(2)})`)}
+function touchdown(){const C=CF(),[gx,gz]=grad(hT,R.x,R.z),slope=Math.atan(Math.hypot(gx,gz)),te=Math.hypot(R.tz-Math.atan(gx),R.tx-Math.atan(-gz)),vi=-R.vy;
+ R.spike=vi/.05;R.vx*=1-C.absorb;R.vz*=1-C.absorb;R.vy=0;R.t=0;R.td={x:R.x,z:R.z,v:Math.hypot(R.vx,R.vz)};
+ const fell=te>C.tiltLim||slope>C.slopeLim||vi>8.5;
+ R.landed={te,slope,vi,fell};
+ if(fell){R.phase='FALLEN';R.falls++;log('LAND',`<b>FALL</b> tilt err ${(te*57.3).toFixed(0)}° (lim ${(C.tiltLim*57.3).toFixed(0)}°), slope ${(slope*57.3).toFixed(0)}° (lim ${(C.slopeLim*57.3).toFixed(0)}°), impact ${vi.toFixed(1)} m/s`)}
+ else R.phase='LAND'}
+function settle(){const P=R.plan,C=CF(),fx=R.x,fz=R.z,res={x:fx-P.c.x+rnd()*.08*S.noise,z:fz-P.c.z+rnd()*.08*S.noise},slide=Math.hypot(fx-R.td.x,fz-R.td.z);
+ const le=Math.hypot(fx-P.c.x,fz-P.c.z);R.errSum+=le;
+ R.bias.x=.6*R.bias.x+.4*res.x;R.bias.z=.6*R.bias.z+.4*res.z;
+ R.rough=.7*R.rough+.3*Math.abs(macro(fx)-hT(fx,fz)+rnd()*.02*S.noise);
+ const hd=Math.hypot(fx-R.take.x,fz-R.take.z),q=.06*S.noise*hd;R.err.x+=rnd()*q;R.err.z+=rnd()*q;R.sp=Math.hypot(R.sp,q,.02);
+ if(slide>.08&&R.td.v>.3){const mu=cl(R.td.v**2/(2*G*slide),.08,1),k=key(fx,fz);MEM[k]=MEM[k]==null?mu:.5*MEM[k]+.5*mu;log('UPDATE',`slid ${slide.toFixed(2)} m → friction est μ≈${mu.toFixed(2)} (cell ${k})`)}
+ log('VERIFY',`landed ${le.toFixed(2)} m from plan (pred ±${P.rad.toFixed(2)})${le>P.rad?' — outside region':''}; rough est ${R.rough.toFixed(2)}`);
+ R.plan=null;R.phase='STANCE';R.t=0;arc.visible=land.visible=false;R.idleLogged=false}
+// ---------- physics step ----------
+function step(dt){T+=dt;const C=CF();imuStep(dt);
+ R.camOn=!!(R.plan&&R.plan.usedCam&&(R.phase==='FLIGHT'||R.phase==='STANCE'))||(S.auto&&S.perc==='always');
+ if(R.camOn)R.Ec+=4*dt;
+ if(R.phase==='FLIGHT'){const P=R.plan;R.t+=dt;
+  R.wz+=(-C.att*(R.etz-P.tgz)-C.att*.45*R.gz)*dt;R.wx+=(-C.att*(R.etx-P.tgx)-C.att*.45*R.gx)*dt;
+  R.tz+=R.wz*dt;R.tx+=R.wx*dt;R.vy-=G*dt;R.x+=R.vx*dt;R.y+=R.vy*dt;R.z+=R.vz*dt;R.e+=(.95-R.e)*6*dt;
+  R.yaw+=(R.yawT-R.yaw)*dt*2;if(R.vy<0&&R.y-foot(R.e)<=hT(R.x,R.z))touchdown();return}
+ // ground dynamics (stance / landing / disturbance slide)
+ const[gx,gz]=grad(hT,R.x,R.z),cs=1/Math.sqrt(1+gx*gx+gz*gz),mu=muT(R.x,R.z),fr=mu*G*cs,ag=Math.hypot(gx,gz)*G*cs;
+ let sp=Math.hypot(R.vx,R.vz);
+ if(sp<.05&&ag<fr){R.vx=R.vz=0}else{R.vx-=G*gx*cs*dt;R.vz-=G*gz*cs*dt;const s2=Math.hypot(R.vx,R.vz),d=fr*dt;if(s2<=d&&ag<fr)R.vx=R.vz=0;else if(s2>0){const k=Math.max(0,(s2-d)/s2);R.vx*=k;R.vz*=k}}
+ R.x=cl(R.x+R.vx*dt,-27,27);R.z=cl(R.z+R.vz*dt,-17,17);sp=Math.hypot(R.vx,R.vz);
+ const ft=Math.min(1,8*dt);
+ if(R.phase==='FALLEN'){R.t+=dt;R.tz+=(-1.3-R.tz)*ft;R.tx+=(.4-R.tx)*ft;R.e+=(.3-R.e)*ft;
+  if(R.t>2){R.Eh+=15;R.phase='STANCE';R.plan=null;arc.visible=land.visible=false;R.t=0;log('RECOVER','self-righting complete (+15 J)')}}
+ else{R.tz+=(Math.atan(gx)-R.tz)*ft;R.tx+=(Math.atan(-gz)-R.tx)*ft;
+  if(R.phase==='LAND'){R.t+=dt;R.e+=(.5-R.e)*ft;if((R.t>.5&&sp<.08)||R.t>2.5)settle()}
+  else{ // STANCE
+   R.yaw+=((R.yawT??R.yaw)-R.yaw)*Math.min(1,3*dt);R.e+=(.8-R.e)*ft;
+   const dist=Math.hypot(S.T.x-R.x,S.T.z-R.z);
+   if(!R.plan&&sp<.12){if((S.auto&&dist>.8)||manual){plan();manual=false}else if(S.auto&&!R.idleLogged){R.idleLogged=true;log('MISSION','target reached')}}
+   if(R.plan){const P=R.plan;P.t+=dt;
+    if(P.t>=P.scanT&&!P.fixed){P.fixed=true;if(P.usedCam){R.err.x*=.3;R.err.z*=.3;R.sp=Math.hypot(.12,.04*S.noise);lastScanT=T}}
+    if(P.t>=P.scanT)R.e=.8-.55*Math.min(1,(P.t-P.scanT)/P.chargeT);
+    if(P.t>=P.scanT+P.chargeT)launch()}}}
+ R.y=hT(R.x,R.z)+foot(R.e)}
+// ---------- camera / input ----------
+let az=-.8,el=.5,dist=26,pan=new THREE.Vector3(),drag=null;
+const views={free:[-.8,.5],side:[Math.PI/2,.1],top:[Math.PI/2,1.5],front:[0,.12]};
+document.querySelectorAll('#vw button').forEach(b=>b.onclick=()=>{[az,el]=views[b.dataset.v];pan.set(0,0,0)});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,pan:e.button===2||e.shiftKey}});
+cv.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
+ if(drag.pan){const r=new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld,0),u=new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld,1);pan.addScaledVector(r,-dx*dist*.0015).addScaledVector(u,dy*dist*.0015)}
+ else{az-=dx*.006;el=cl(el+dy*.005,.05,1.5)}});
+cv.addEventListener('pointerup',e=>{if(drag&&Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<5&&!drag.pan){
+  const rc=new THREE.Raycaster(),v=new THREE.Vector2(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);rc.setFromCamera(v,cam);
+  const h=rc.intersectObject(terr)[0];if(h){S.T={x:cl(h.point.x,-27,27),z:cl(h.point.z,-17,17)};R.idleLogged=false;log('TARGET',`(${S.T.x.toFixed(1)}, ${S.T.z.toFixed(1)})`)}}drag=null});
+cv.addEventListener('wheel',e=>{dist=cl(dist+e.deltaY*.03,5,70);e.preventDefault()},{passive:false});
+addEventListener('keydown',e=>{if(S.auto)return;const k={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+ if(k){S.T.x=cl(S.T.x+k[0],-27,27);S.T.z=cl(S.T.z+k[1],-17,17);e.preventDefault()}
+ if(e.code==='Space'){manual=true;e.preventDefault()}});
+function resize(){rd.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener('resize',resize);
+// ---------- UI wiring ----------
+[['diff','diff'],['noise','noise'],['pwr','pwr'],['thr','thr'],['spd','speed']].forEach(([id,k])=>$(id).oninput=e=>{S[k]=+e.target.value;if($('v_'+id))$('v_'+id).textContent=e.target.value;if(id==='diff'){rebuild();R.y=hT(R.x,R.z)+foot(R.e)}});
+$('ang').oninput=e=>{S.ang=e.target.value*Math.PI/180;$('v_ang').textContent=e.target.value};
+['diff','noise','pwr','thr'].forEach(id=>$('v_'+id).textContent=$(id).value);$('v_ang').textContent=55;
+$('cfg').onchange=e=>{S.cfg=e.target.value;buildBot();reset();par()};
+$('ctl').onchange=e=>{S.auto=e.target.value==='auto'};$('perc').onchange=e=>S.perc=e.target.value;
+$('pz').onclick=()=>{S.paused=!S.paused;$('pz').textContent=S.paused?'Resume':'Pause';$('pz').classList.toggle('on',S.paused)};
+$('st').onclick=()=>{S.paused=true;$('pz').textContent='Resume';for(let i=0;i<12;i++)step(1/120)};
+$('rs').onclick=reset;
+$('ds').onclick=()=>{if(R.phase==='FLIGHT'){R.vx+=rnd()*2;R.vz+=rnd()*2;R.wz+=rnd()*1.5;R.wx+=rnd()*1.5}else{R.vx+=rnd()*2.5;R.vz+=rnd()*2.5}log('DISTURB',R.phase==='FLIGHT'?'in-flight gust + torque':'ground shove')};
+$('sens').onchange=e=>sensG.visible=e.target.checked;$('hide').onclick=()=>document.body.classList.toggle('hid');
+function par(){const C=CF();$('par').textContent=`${C.n}\nmass ${C.m} kg · launch eff ${C.eff}\nlaunch σ ${(C.sigL*100).toFixed(0)}% · attitude kick σ ${C.kick} rad/s\nattitude authority ${C.att}\ntilt limit ${(C.tiltLim*57.3).toFixed(0)}° · slope limit ${(C.slopeLim*57.3).toFixed(0)}°\nimpact absorb ${C.absorb} · v0 max ${C.v0max} m/s\nleg stroke ${C.f1} m`}
+// ---------- HUD ----------
+const ov=$('ov').getContext('2d'),V3=new THREE.Vector3();
+function proj(x,z,dy=.1){V3.set(x,hT(x,z)+dy,z).project(fpc);return V3.z<1&&V3.z>-1?[(V3.x+1)*140*($('ov').width/280),(1-V3.y)*90*($('ov').height/180),V3.z]:null}
+function drawOv(){const W=280,H=180,sx=$('ov').width/W;ov.setTransform(sx,0,0,sx,0,0);ov.clearRect(0,0,W,H);const on=R.camOn;
+ if(!on){ov.fillStyle='rgba(15,17,20,.78)';ov.fillRect(0,0,W,H)}
+ ov.strokeStyle='#5fd4e8';ov.lineWidth=1;ov.strokeRect(1,1,W-2,H-2);ov.beginPath();ov.moveTo(W/2-10,H/2);ov.lineTo(W/2+10,H/2);ov.moveTo(W/2,H/2-10);ov.lineTo(W/2,H/2+10);ov.stroke();
+ ov.font='10px monospace';ov.fillStyle=on?'#5fd4e8':'#8b9099';ov.fillText(on?'ONBOARD CAM · ACTIVE':'ONBOARD CAM · STANDBY (sensor off)',8,14);
+ const t=proj(S.T.x,S.T.z,.3);if(t&&on){ov.strokeStyle='#d11a3a';ov.strokeRect(t[0]-7,t[1]-7,14,14);ov.fillStyle='#d11a3a';ov.fillText('TGT',t[0]+10,t[1])}
+ if(on&&R.plan)for(const c of R.plan.cands){const p=proj(c.x,c.z);if(!p)continue;const k=cl(c.r/.8,0,1);ov.fillStyle=`rgb(${95+k*116|0},${212-k*186|0},${232-k*174|0})`;ov.beginPath();ov.arc(p[0],p[1],3,0,TAU);ov.fill();
+  if(c===R.plan.c||(c.x===R.plan.c.x&&c.z===R.plan.c.z)){ov.strokeStyle='#e8e6e1';ov.beginPath();ov.arc(p[0],p[1],8,0,TAU);ov.stroke();ov.fillStyle='#e8e6e1';ov.fillText('r '+c.r.toFixed(2),p[0]+10,p[1]+3)}}}
+let hudT=0;
+function hud(){const C=CF(),D=57.3,P=R.plan;
+ $('ph').textContent=R.phase+(R.phase==='STANCE'&&P?(P.t<P.scanT?' · SCAN':' · CHARGE'):'');
+ $('pcs').textContent=R.camOn?'CAMERA ON':'camera off';$('td').textContent=Math.hypot(S.T.x-R.x,S.T.z-R.z).toFixed(1)+' m';
+ $('pe').textContent=`${R.sp.toFixed(2)} / ${Math.hypot(R.err.x,R.err.z).toFixed(2)} m`;$('rg').textContent=R.rough.toFixed(3);
+ $('rk').textContent=P?`${P.c.r.toFixed(2)} / ±${P.rad.toFixed(2)} m`:'-';$('bs').textContent=`${R.bias.x.toFixed(2)}, ${R.bias.z.toFixed(2)}`;
+ $('im').textContent=`${(R.etx*D).toFixed(1)}, ${(R.etz*D).toFixed(1)}`;$('it').textContent=`${(R.tx*D).toFixed(1)}, ${(R.tz*D).toFixed(1)}`;
+ $('gy').textContent=`${R.gx.toFixed(2)}, ${R.gz.toFixed(2)}`;$('ac').textContent=R.acc.toFixed(1)+' m/s²';
+ $('en').textContent=(R.e+rnd()*.005*S.noise).toFixed(2);$('cm').textContent=R.camOn?'streaming 4 W':(lastScanT>0?`last scan ${(T-lastScanT).toFixed(0)} s ago`:'no scan yet');
+ $('hf').textContent=`${R.hops} / ${R.falls}`;$('le').textContent=R.hops?(R.errSum/Math.max(1,R.hops-R.falls||1)).toFixed(2)+' m':'-';
+ $('sc').textContent=`${R.scans} / ${R.skipped}`;$('en2').textContent=`${R.Eh.toFixed(0)} / ${R.Ec.toFixed(0)}`;$('log').innerHTML=logs.map(l=>`<div>${l}</div>`).join('')}
+// ---------- main loop ----------
+let last=performance.now(),acc=0;
+function frame(now){const dt=Math.min((now-last)/1000,.05);last=now;
+ if(!S.paused){acc+=dt*S.speed;let n=0;while(acc>=1/120&&n++<40){step(1/120);acc-=1/120}}
+ bot.position.set(R.x,R.y,R.z);bot.rotation.set(R.tx,R.yaw,R.tz,'YXZ');poseLegs(R.e);
+ tgt.position.set(S.T.x,hT(S.T.x,S.T.z),S.T.z);
+ const ct=new THREE.Vector3(R.x,R.y,R.z).add(pan);
+ cam.position.set(ct.x+Math.cos(az)*Math.cos(el)*dist,ct.y+Math.sin(el)*dist,ct.z+Math.sin(az)*Math.cos(el)*dist);cam.lookAt(ct);cam.updateMatrixWorld();
+ rd.setScissorTest(false);rd.setViewport(0,0,innerWidth,innerHeight);rd.clear();rd.render(sc,cam);
+ const b=$('fp').getBoundingClientRect();if(b.width>0&&getComputedStyle($('fp')).display!=='none'){fpc.aspect=b.width/b.height;fpc.updateProjectionMatrix();
+  rd.setScissorTest(true);rd.setViewport(b.left,innerHeight-b.bottom,b.width,b.height);rd.setScissor(b.left,innerHeight-b.bottom,b.width,b.height);rd.clearDepth();
+  bot.children.forEach(c=>{if(c!==fpc&&c!==sensG)c.visible=false});sensG.visible=false;rd.render(sc,fpc);
+  bot.children.forEach(c=>c.visible=true);sensG.visible=$('sens').checked;drawOv()}
+ if(now-hudT>90){hudT=now;hud()}requestAnimationFrame(frame)}
+resize();rebuild();buildBot();par();reset();requestAnimationFrame(frame);
+</script></body></html>
